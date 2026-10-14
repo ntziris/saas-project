@@ -1,0 +1,355 @@
+# Docker Compose file for the solve-my-problem project
+
+# Set environment variables and constants
+x-environment: &environment
+  NODE_ENV: production  # Change this to 'development' when needed
+  JWT_SECRET: ${JWT_SECRET}
+
+# Define constants
+x-user-service-constants: &user-service-constants
+  MONGODB_URI: ${MONGODB_URI_USER_SERVICE}
+  ADMIN_EMAIL: ${ADMIN_EMAIL}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+  ADMIN_NAME: ${ADMIN_NAME}
+  USERS_EXCHANGE: ${USERS_EXCHANGE}
+  TRANSACTIONS_EXCHANGE: ${TRANSACTIONS_EXCHANGE}
+  USER_TRANSACTIONS_QUEUE: ${USER_TRANSACTIONS_QUEUE}
+
+x-transaction-service-constants: &transaction-service-constants
+  MONGODB_URI: ${MONGODB_URI_TRANSACTION_SERVICE}
+  TRANSACTIONS_EXCHANGE: ${TRANSACTIONS_EXCHANGE}
+
+x-submission-service-constants: &submission-service-constants
+  MONGODB_URI: ${MONGODB_URI_SUBMISSION_SERVICE}
+  SUBMISSIONS_EXCHANGE: ${SUBMISSIONS_EXCHANGE}
+  RESULTS_EXCHANGE: ${RESULTS_EXCHANGE}
+  SUBMISSION_RESULTS_QUEUE: ${SUBMISSION_RESULTS_QUEUE}
+
+x-solver-model-service-constants: &solver-model-service-constants
+  MONGODB_URI: ${MONGODB_URI_SOLVER_MODEL_SERVICE}
+
+x-or-tools-service-constants: &or-tools-service-constants
+  SUBMISSIONS_EXCHANGE: ${SUBMISSIONS_EXCHANGE}
+  SOLVER_SUBMISSIONS_QUEUE: ${SOLVER_SUBMISSIONS_QUEUE}
+
+x-result-service-constants: &result-service-constants
+  MONGODB_URI: ${MONGODB_URI_RESULT_SERVICE}
+  RESULT_RESULTS_QUEUE: ${RESULT_RESULTS_QUEUE}
+
+x-analytics-service-constants: &analytics-service-constants
+  REDIS_HOST: ${REDIS_HOST}
+  REDIS_PORT: ${REDIS_PORT}
+  USERS_EXCHANGE: ${USERS_EXCHANGE}
+  TRANSACTIONS_EXCHANGE: ${TRANSACTIONS_EXCHANGE}
+  SUBMISSIONS_EXCHANGE: ${SUBMISSIONS_EXCHANGE}
+  RESULTS_EXCHANGE: ${RESULTS_EXCHANGE}
+  ANALYTICS_USERS_QUEUE: ${ANALYTICS_USERS_QUEUE}
+  ANALYTICS_TRANSACTIONS_QUEUE: ${ANALYTICS_TRANSACTIONS_QUEUE}
+  ANALYTICS_SUBMISSIONS_QUEUE: ${ANALYTICS_SUBMISSIONS_QUEUE}
+  ANALYTICS_RESULTS_QUEUE: ${ANALYTICS_RESULTS_QUEUE}
+
+x-storage-service-constants: &storage-service-constants
+  STORAGE_ENDPOINT: storage-service
+  STORAGE_PORT: ${STORAGE_PORT}
+  STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY}
+  STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY}
+  STORAGE_USE_SSL: "false"
+
+x-storage-service-root: &storage-service-root
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+
+x-messaging-service-constants: &messaging-service-constants
+  RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+  RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+  RABBITMQ_HOST: ${RABBITMQ_HOST}
+  RABBITMQ_PORT: ${RABBITMQ_PORT}
+
+# Define custom networks for service isolation
+networks:
+  api-gateway-service-net:
+    driver: bridge
+  user-service-net:
+    driver: bridge
+  transaction-service-net:
+    driver: bridge
+  submission-service-net:
+    driver: bridge
+  solver-model-service-net:
+    driver: bridge
+  result-service-net:
+    driver: bridge
+  analytics-service-net:
+    driver: bridge
+  storage-service-net:
+    driver: bridge
+  messaging-service-net:
+    driver: bridge
+
+# Define services
+services:
+  #Frontend
+  frontend:
+    container_name: frontend
+    image: frontend
+    build:
+      context: ./frontend
+      dockerfile: frontend.dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:80
+    restart: always
+    depends_on:
+      - api-gateway-service
+  # API Gateway Service
+  api-gateway-service:
+    container_name: api-gateway-service
+    build: ./api-gateway-service
+    ports:
+      - "80:80"  # Expose port 80 for external access
+    networks:
+      - api-gateway-service-net
+    depends_on:
+      - user-service
+      - transaction-service
+      - submission-service
+      - solver-model-service
+      - result-service
+      - analytics-service
+
+  # User Service
+  user-service:
+    container_name: user-service
+    build: ./user-service
+    ports:
+      - "3001:3001"  # Expose port 3001 for the user service
+    networks:
+      - user-service-net
+      - api-gateway-service-net
+      - messaging-service-net
+    environment:
+      <<: [*environment, *user-service-constants, *messaging-service-constants]
+    depends_on:
+      user-service-db:
+        condition: service_healthy
+      messaging-service:
+        condition: service_healthy
+
+  # User Service Database
+  user-service-db:
+    container_name: user-service-db
+    image: mongo:latest
+    networks:
+      - user-service-net
+    volumes:
+      - user_service_db_data:/data/db
+    healthcheck:
+      test: ["CMD","mongosh", "--eval", "db.adminCommand('ping')"]
+
+  # Transaction Service
+  transaction-service:
+    container_name: transaction-service
+    build: ./transaction-service
+    ports:
+      - "3002:3002"  # Expose port 3002 for the transaction service
+    networks:
+      - transaction-service-net
+      - api-gateway-service-net
+      - messaging-service-net
+    environment:
+      <<: [*environment, *transaction-service-constants, *messaging-service-constants]
+    depends_on:
+      transaction-service-db:
+        condition: service_healthy
+      messaging-service:
+        condition: service_healthy
+
+  # Transaction Service Database
+  transaction-service-db:
+    container_name: transaction-service-db
+    image: mongo:latest
+    networks:
+      - transaction-service-net
+    volumes:
+      - transaction_service_db_data:/data/db
+    healthcheck:
+      test: ["CMD","mongosh", "--eval", "db.adminCommand('ping')"]
+
+  # Submission Service
+  submission-service:
+    container_name: submission-service
+    build: ./submission-service
+    ports:
+      - "3003:3003"  # Expose port 3003 for the submission service
+    networks:
+      - submission-service-net
+      - api-gateway-service-net
+      - messaging-service-net
+    environment:
+      <<: [*environment, *submission-service-constants, *messaging-service-constants, *storage-service-constants]
+    depends_on:
+      submission-service-db:
+        condition: service_healthy
+      messaging-service:
+        condition: service_healthy
+
+  # Submission Service Database
+  submission-service-db:
+    container_name: submission-service-db
+    image: mongo:latest
+    networks:
+      - submission-service-net
+    volumes:
+      - submission_service_db_data:/data/db
+    healthcheck:
+      test: ["CMD","mongosh", "--eval", "db.adminCommand('ping')"]
+
+  # Solver Model Service
+  solver-model-service:
+    container_name: solver-model-service
+    build: ./solver-model-service
+    ports:
+      - "3004:3004"
+    networks:
+      - solver-model-service-net
+      - api-gateway-service-net
+      - storage-service-net
+      - messaging-service-net
+    environment:
+      <<: [*environment, *solver-model-service-constants, *storage-service-constants]
+    depends_on:
+      solver-model-service-db:
+        condition: service_healthy
+      storage-service:
+        condition: service_started
+
+  # Solver Model Service Database
+  solver-model-service-db:
+    container_name: solver-model-service-db
+    image: mongo:latest
+    networks:
+      - solver-model-service-net
+    volumes:
+      - solver_model_service_db_data:/data/db
+    healthcheck:
+      test: ["CMD","mongosh", "--eval", "db.adminCommand('ping')"]
+
+  # Or-tools Service
+  or-tools-service:
+    container_name: or-tools-service
+    build: ./or-tools-service
+    networks:
+      - messaging-service-net
+      - storage-service-net
+    environment:
+      <<: [*or-tools-service-constants, *messaging-service-constants, *storage-service-constants]
+    depends_on:
+      messaging-service:
+        condition: service_healthy
+      storage-service:
+        condition: service_started
+
+  # Result Service
+  result-service:
+    container_name: result-service
+    build: ./result-service
+    ports:
+      - "3005:3005"
+    networks:
+      - result-service-net
+      - api-gateway-service-net
+      - messaging-service-net
+    environment:
+      <<: [*environment, *result-service-constants, *messaging-service-constants]
+    depends_on:
+      solver-model-service-db:
+        condition: service_healthy
+      messaging-service:
+        condition: service_healthy
+
+  # Result Service Database
+  result-service-db:
+    container_name: result-service-db
+    image: mongo:latest
+    networks:
+      - result-service-net
+    volumes:
+      - result_service_db_data:/data/db
+    healthcheck:
+      test: ["CMD","mongosh", "--eval", "db.adminCommand('ping')"]
+
+  # Analytics Service
+  analytics-service:
+    container_name: analytics-service
+    build: ./analytics-service
+    ports:
+      - "3006:3006"  # Expose port 3006 for the analytics service
+    networks:
+      - analytics-service-net
+      - api-gateway-service-net
+      - messaging-service-net
+    environment:
+      <<: [*environment, *analytics-service-constants, *messaging-service-constants]
+    depends_on:
+      redis:
+        condition: service_healthy
+      messaging-service:
+        condition: service_healthy
+
+  # Redis for Analytics Service (for now)
+  redis:
+    container_name: redis
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - analytics-service-net
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+
+  # Storage Service (MinIO)
+  storage-service:
+    container_name: storage-service
+    build: ./storage-service
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - storage-service-net
+    volumes:
+      - storage_service_data:/data
+    environment:
+      <<: [*storage-service-root, *storage-service-constants]
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+
+  # Messaging Service (RabbitMQ)
+  messaging-service:
+    container_name: messaging-service
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"  # AMQP protocol port
+      - "15672:15672"  # Management UI port
+    networks:
+      - messaging-service-net
+    volumes:
+      - messaging_service_data:/var/lib/rabbitmq
+    environment:
+      <<: *messaging-service-constants
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+
+# Define named volumes for persistent data storage
+volumes:
+  user_service_db_data:
+  transaction_service_db_data:
+  submission_service_db_data:
+  messaging_service_data:
+  storage_service_data:
+  solver_model_service_db_data:
+  result_service_db_data:
+  redis_data:

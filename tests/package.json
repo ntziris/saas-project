@@ -1,0 +1,21 @@
+{
+  "name": "tests",
+  "description": "Testing for solve-my-problem microservices project",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "jest",
+    "test:integration": "jest tests/integration --runInBand",
+    "test:integration:user": "jest tests/integration/user-service.test.js",
+    "test:integration:transaction": "jest tests/integration/transaction-service.test.js",
+    "test:integration:auth": "jest tests/integration/authentication.test.js",
+    "test:integration:messaging": "jest tests/integration/messaging-service.test.js",
+    "test:integration:solver": "jest tests/integration/solver-model-service.test.js",
+    "test:integration:submission": "jest tests/integration/submission-run.test.js",
+    "test:all": "jest --runInBand"
+  },
+  "dependencies": {
+    "axios": "^1.7.5",
+    "jest": "^29.7.0",
+    "uuid": "^10.0.0"
+  }
+}
